@@ -147,16 +147,17 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
 
                 if (type.Prefix is string prefix)
                 {
-                    // FIXME: Double encode
-                    sb.Append(/* lang=c#-test */ $$"""
-                            var originalNamePrefix = writer.NamePrefix;
-                            if (writer.NamePrefix == null)
+                    var encodedPrefix = UrlEncoder.Default.Encode(prefix);
+                    sb.Append($$"""
+                            ref var namePrefix = ref GetNamePrefix(ref writer);
+                            var originalNamePrefix = namePrefix;
+                            if (originalNamePrefix == null)
                             {
-                                writer.NamePrefix = "{{prefix}}";
+                                namePrefix = "{{encodedPrefix}}";
                             }
                             else
                             {
-                                writer.NamePrefix = originalNamePrefix + "{{prefix}}";
+                                namePrefix = originalNamePrefix + "{{encodedPrefix}}";
                             }
 
                             """);
@@ -212,8 +213,29 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
 
                     i++;
                 }
+
+                if (type.Prefix is not null)
+                {
+                    sb.Append(/* lang=c#-test */ """
+
+                            namePrefix = originalNamePrefix;
+
+                            """);
+                }
                 sb.AppendLine("""
                             }
+                    """);
+
+                if (type.Prefix is not null)
+                {
+                    sb.AppendLine(/* lang=c#-test */ """
+
+                                [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "namePrefix")]
+                                private static extern ref string? GetNamePrefix(ref WebSerializerWriter writer);
+                        """);
+                }
+
+                sb.AppendLine("""
                         }
                     """);
             }
