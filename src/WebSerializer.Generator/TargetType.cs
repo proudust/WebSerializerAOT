@@ -115,7 +115,7 @@ public sealed class TargetTypeMember
         var dataMemberAttr = attrs.FirstOrDefault(x => SymbolEqualityComparer.Default.Equals(x.AttributeClass, _knownSymbols.DataMemberAttributeType));
         var webSerializerAttr = attrs.FirstOrDefault(x => SymbolEqualityComparer.Default.Equals(x.AttributeClass, _knownSymbols.WebSerializerAttributeType));
 
-        Order = dataMemberAttr?.GetNamedArgument(nameof(DataMemberAttribute.Order), int.MaxValue) ?? int.MaxValue;
+        Order = dataMemberAttr?.GetNamedArgument(nameof(DataMemberAttribute.Order), defaultValue: -1) ?? int.MaxValue;
         Type = symbol.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         IsNullable = symbol.Type is { IsValueType: false } or { Name: "Nullable" };
         MemberName = symbol.Name;
