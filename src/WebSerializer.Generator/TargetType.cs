@@ -77,8 +77,15 @@ public sealed class TargetType
         Name = symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
         Members = symbol
             .GetMembers()
-            .OfType<IPropertySymbol>()
-            .Select(symbol => new TargetTypeMember(symbol, _knownSymbols))
+            .Where(static symbol => symbol is IPropertySymbol
+            {
+                IsStatic: false,
+                IsImplicitlyDeclared: false,
+                CanBeReferencedByName: true,
+                IsIndexer: false,
+                GetMethod: not null,
+            })
+            .Select(symbol => new TargetTypeMember((IPropertySymbol)symbol, _knownSymbols))
             .OrderBy(static member => member.Order)
             .ToArray();
     }
