@@ -9,7 +9,9 @@ namespace Proudust.Web;
 [Generator(LanguageNames.CSharp)]
 public sealed partial class WebSerializerGenerator : IIncrementalGenerator
 {
-    public const string WebSerializableAttributeFullName = "Proudust.Web.WebSerializableAttribute`1";
+    internal const string WebSerializableAttributeFullName = "Proudust.Web.WebSerializableAttribute";
+
+    internal const string WebSerializableAttributeTFullName = "Proudust.Web.WebSerializableAttribute`1";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -23,6 +25,15 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
                 using System.Diagnostics;
 
                 namespace Proudust.Web;
+                
+                [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+                [Conditional("COMPILE_TIME_ONLY")]
+                internal sealed class WebSerializableAttribute : Attribute
+                {
+                    public WebSerializableAttribute(Type type)
+                    {
+                    }
+                }
 
                 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
                 [Conditional("COMPILE_TIME_ONLY")]
@@ -30,24 +41,32 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
                 """);
         });
 
-        var typeDeclarations = context.SyntaxProvider.ForAttributeWithMetadataName(
+        var knownTypeSymbols = context.CompilationProvider
+            .Select((compilation, _) => new KnownTypeSymbols(compilation));
+
+        var nonGeneric = context.SyntaxProvider.ForAttributeWithMetadataName(
             WebSerializableAttributeFullName,
-            predicate: static (node, token) =>
-            {
-                return node is ClassDeclarationSyntax;
-            },
-            transform: static (context, token) =>
-            {
-                return (TypeDeclarationSyntax)context.TargetNode;
-            });
+            predicate: static (node, _) => node is ClassDeclarationSyntax,
+            transform: static (context, _) => (TypeDeclarationSyntax)context.TargetNode
+        );
 
-        var source = typeDeclarations.Combine(context.CompilationProvider);
+        var generic = context.SyntaxProvider.ForAttributeWithMetadataName(
+            WebSerializableAttributeTFullName,
+            predicate: static (node, _) => node is ClassDeclarationSyntax,
+            transform: static (context, _) => (TypeDeclarationSyntax)context.TargetNode
+        );
 
-        context.RegisterSourceOutput(source, static (context, source) =>
+        // https://github.com/dotnet/roslyn/issues/74585#issuecomment-2260094810
+        var typeDeclarations = nonGeneric
+            .Collect()
+            .Combine(generic.Collect())
+            .SelectMany(static (tuple, _) => tuple.Left.AddRange(tuple.Right).Distinct());
+
+        context.RegisterSourceOutput(typeDeclarations.Combine(knownTypeSymbols), static (context, source) =>
         {
-            var (typeDeclaration, compilation) = source;
+            var (typeDeclaration, knownSymbols) = source;
 
-            var semanticModel = compilation.GetSemanticModel(typeDeclaration.SyntaxTree);
+            var semanticModel = knownSymbols.Compilation.GetSemanticModel(typeDeclaration.SyntaxTree);
             var typeSymbol = semanticModel.GetDeclaredSymbol(typeDeclaration, context.CancellationToken);
             if (typeSymbol is null)
             {
@@ -65,7 +84,7 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
 
                 """);
 
-            var providerType = new ProviderType(typeSymbol);
+            var providerType = new ProviderType(typeSymbol, knownSymbols);
             if (providerType.Namespace is string ns)
             {
                 sb.Append("namespace ").Append(ns).AppendLine(";");
@@ -214,7 +233,7 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
                 .Replace("global::", "")
                 .Replace("<", "_")
                 .Replace(">", "_");
-            context.AddSource($"{fullType}.g.cs", sb.ToString());
+            context.AddSource($"{fullType}.WebSerializable.g.cs", sb.ToString());
         });
     }
 }

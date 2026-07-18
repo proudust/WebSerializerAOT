@@ -1,5 +1,5 @@
-﻿using System.Runtime.Serialization;
-using Cysharp.Web;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Runtime.Serialization;
 using Microsoft.CodeAnalysis;
 
 namespace Proudust.Web;
@@ -16,15 +16,19 @@ public sealed class ProviderType
 
     public TargetType[] TargetTypes { get; }
 
-    public ProviderType(INamedTypeSymbol symbol)
+    private readonly KnownTypeSymbols _knownSymbols;
+
+    public ProviderType(INamedTypeSymbol symbol, KnownTypeSymbols knownSymbols)
     {
+        _knownSymbols = knownSymbols;
+
         Namespace = symbol.ContainingNamespace switch
         {
             { IsGlobalNamespace: false } ns => $"{ns}",
             _ => null,
         };
         Parents = symbol.EnumerateContainingTypes()
-            .Select(symbol =>
+            .Select(static symbol =>
             {
                 string typeKeyword = symbol.GetTypeKeyword();
                 string name = symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
@@ -35,9 +39,21 @@ public sealed class ProviderType
         Name = symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
         FullyQualifiedName = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         TargetTypes = symbol.GetAttributes()
-            .Where(static x => x.AttributeClass?.Name is "WebSerializableAttribute")
-            .Select(static x => new TargetType((INamedTypeSymbol)x.AttributeClass!.TypeArguments[0]))
+            .Where(x => SymbolEqualityComparer.Default.Equals(x.AttributeClass?.ConstructedFrom, _knownSymbols.WebSerializableGenericAttributeType)
+                || SymbolEqualityComparer.Default.Equals(x.AttributeClass, _knownSymbols.WebSerializableNonGenericAttributeType))
+            .Select(x => new TargetType(x switch
+            {
+                { AttributeClass.TypeArguments: [INamedTypeSymbol typeSymbol, ..] } => typeSymbol,
+                { ConstructorArguments: [{ Value: INamedTypeSymbol typeSymbol }, ..] } => typeSymbol,
+                _ => Throw(),
+            }, _knownSymbols))
             .ToArray();
+
+        [DoesNotReturn]
+        static INamedTypeSymbol Throw()
+        {
+            throw new InvalidOperationException("Missing type argument for [WebSerializable].");
+        }
     }
 }
 
@@ -49,17 +65,21 @@ public sealed class TargetType
 
     public TargetTypeMember[] Members { get; }
 
-    public TargetType(INamedTypeSymbol symbol)
+    private readonly KnownTypeSymbols _knownSymbols;
+
+    public TargetType(INamedTypeSymbol symbol, KnownTypeSymbols knownSymbols)
     {
+        _knownSymbols = knownSymbols;
+
         Prefix = symbol.GetAttributes()
-            .FirstOrDefault(x => x.AttributeClass?.Name is nameof(DataContractAttribute))
+            .FirstOrDefault(x => SymbolEqualityComparer.Default.Equals(x.AttributeClass, _knownSymbols.DataContractAttributeType))
             ?.GetNamedArgument<string>(nameof(DataContractAttribute.Namespace));
         Name = symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
         Members = symbol
             .GetMembers()
             .OfType<IPropertySymbol>()
-            .Select(symbol => new TargetTypeMember(symbol))
-            .OrderBy(member => member.Order)
+            .Select(symbol => new TargetTypeMember(symbol, _knownSymbols))
+            .OrderBy(static member => member.Order)
             .ToArray();
     }
 }
@@ -78,11 +98,15 @@ public sealed class TargetTypeMember
 
     public string? WebSerializer { get; }
 
-    public TargetTypeMember(IPropertySymbol symbol)
+    private readonly KnownTypeSymbols _knownSymbols;
+
+    public TargetTypeMember(IPropertySymbol symbol, KnownTypeSymbols knownSymbols)
     {
+        _knownSymbols = knownSymbols;
+
         var attrs = symbol.GetAttributes();
-        var dataMemberAttr = attrs.FirstOrDefault(x => x.AttributeClass?.Name is nameof(DataMemberAttribute));
-        var webSerializerAttr = attrs.FirstOrDefault(x => x.AttributeClass?.Name is nameof(WebSerializerAttribute));
+        var dataMemberAttr = attrs.FirstOrDefault(x => SymbolEqualityComparer.Default.Equals(x.AttributeClass, _knownSymbols.DataMemberAttributeType));
+        var webSerializerAttr = attrs.FirstOrDefault(x => SymbolEqualityComparer.Default.Equals(x.AttributeClass, _knownSymbols.WebSerializerAttributeType));
 
         Order = dataMemberAttr?.GetNamedArgument(nameof(DataMemberAttribute.Order), int.MaxValue) ?? int.MaxValue;
         Type = symbol.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);

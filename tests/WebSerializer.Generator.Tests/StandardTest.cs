@@ -30,7 +30,7 @@ public partial class StandardTest
         {
             SortDirection = SortDirection.Default,
             CurrentPage = 10,
-            SortBy = "hoge and ���{�� japanese"
+            SortBy = "hoge and 日本語 japanese"
         };
 
         var nullReq = new PagingRequest
@@ -58,7 +58,7 @@ public partial class StandardTest
         {
             SortDirection = SortDirection.Default,
             CurrentPage = 10,
-            SortBy = "hoge and ���{�� japanese"
+            SortBy = "hoge and 日本語 japanese"
         };
 
         var content = WebSerializer.ToHttpContent(req, options);
@@ -67,7 +67,7 @@ public partial class StandardTest
 
         var form = new FormUrlEncodedContent([
             new ("CurrentPage", "10" ),
-            new ("SortBy", "hoge and ���{�� japanese" ),
+            new ("SortBy", "hoge and 日本語 japanese" ),
             new ("SortDirection", "Default" ),
         ]);
 
