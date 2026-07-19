@@ -44,6 +44,9 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
         var knownTypeSymbols = context.CompilationProvider
             .Select((compilation, _) => new KnownTypeSymbols(compilation));
 
+        var isNet8OrGreater = context.ParseOptionsProvider
+            .Select(static (parseOptions, _) => parseOptions.PreprocessorSymbolNames.Contains("NET8_0_OR_GREATER"));
+
         var nonGeneric = context.SyntaxProvider.ForAttributeWithMetadataName(
             WebSerializableAttributeFullName,
             predicate: static (node, _) => node is ClassDeclarationSyntax,
@@ -62,9 +65,17 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
             .Combine(generic.Collect())
             .SelectMany(static (tuple, _) => tuple.Left.AddRange(tuple.Right).Distinct());
 
-        context.RegisterSourceOutput(typeDeclarations.Combine(knownTypeSymbols), static (context, source) =>
+        context.RegisterSourceOutput(typeDeclarations.Combine(knownTypeSymbols).Combine(isNet8OrGreater), static (context, source) =>
         {
-            var (typeDeclaration, knownSymbols) = source;
+            var ((typeDeclaration, knownSymbols), isNet8OrGreater) = source;
+
+            if (!isNet8OrGreater)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.TargetFrameworkTooLow,
+                    typeDeclaration.Identifier.GetLocation()));
+                return;
+            }
 
             var semanticModel = knownSymbols.Compilation.GetSemanticModel(typeDeclaration.SyntaxTree);
             var typeSymbol = semanticModel.GetDeclaredSymbol(typeDeclaration, context.CancellationToken);
