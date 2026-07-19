@@ -76,16 +76,32 @@ public sealed class TargetType
             ?.GetNamedArgument<string>(nameof(DataContractAttribute.Namespace));
         Name = symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
         Members = symbol
-            .GetMembers()
-            .Where(static symbol => symbol is IPropertySymbol
+            .GetAllMembers()
+            .Where(static x => x is
             {
                 IsStatic: false,
                 IsImplicitlyDeclared: false,
                 CanBeReferencedByName: true,
+            } and (IFieldSymbol
+            {
+                IsConst: false,
+                DeclaredAccessibility: Accessibility.Public,
+            } or IPropertySymbol
+            {
                 IsIndexer: false,
                 GetMethod: not null,
+            }))
+            // Mimic reflection
+            .Select(static (member, index) => (member, index))
+            .GroupBy(static x => x.member switch
+            {
+                IPropertySymbol p => $"P:{p.Name}:{p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}",
+                _ => $"F:{x.index}",
             })
-            .Select(symbol => new TargetTypeMember((IPropertySymbol)symbol, _knownSymbols))
+            .Select(static group => group.Last().member)
+            .Where(x => x.DeclaredAccessibility is Accessibility.Public
+                && x.GetAttribute(_knownSymbols.IgnoreWebSerializeAttributeType, walkOverrides: true) is null)
+            .Select(member => new TargetTypeMember(member, symbol, _knownSymbols))
             .OrderBy(static member => member.Order)
             .ToArray();
     }
@@ -99,7 +115,9 @@ public sealed class TargetTypeMember
 
     public bool IsNullable { get; }
 
-    public string MemberName { get; }
+    public string ValueAccess { get; }
+
+    public UnsafeGetterAccessor? GetterAccessor { get; }
 
     public string SerializedName { get; }
 
@@ -107,23 +125,60 @@ public sealed class TargetTypeMember
 
     private readonly KnownTypeSymbols _knownSymbols;
 
-    public TargetTypeMember(IPropertySymbol symbol, KnownTypeSymbols knownSymbols)
+    public TargetTypeMember(ISymbol symbol, INamedTypeSymbol targetType, KnownTypeSymbols knownSymbols)
     {
         _knownSymbols = knownSymbols;
 
-        var attrs = symbol.GetAttributes();
-        var dataMemberAttr = attrs.FirstOrDefault(x => SymbolEqualityComparer.Default.Equals(x.AttributeClass, _knownSymbols.DataMemberAttributeType));
-        var webSerializerAttr = attrs.FirstOrDefault(x => SymbolEqualityComparer.Default.Equals(x.AttributeClass, _knownSymbols.WebSerializerAttributeType));
+        var dataMemberAttr = symbol.GetAttribute(knownSymbols.DataMemberAttributeType, walkOverrides: false);
+        var webSerializerAttr = symbol.GetAttribute(knownSymbols.WebSerializerAttributeType, walkOverrides: true);
+
+        var memberType = symbol switch
+        {
+            IPropertySymbol property => property.Type,
+            IFieldSymbol field => field.Type,
+            _ => throw new InvalidOperationException($"Unsupported member kind: {symbol.Kind}"),
+        };
 
         Order = dataMemberAttr?.GetNamedArgument(nameof(DataMemberAttribute.Order), defaultValue: -1) ?? int.MaxValue;
-        Type = symbol.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-        IsNullable = symbol.Type is { IsValueType: false } or { Name: "Nullable" };
-        MemberName = symbol.Name;
+        Type = memberType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        IsNullable = memberType is { IsValueType: false } or { Name: "Nullable" };
         SerializedName = dataMemberAttr?.GetNamedArgument<string>(nameof(DataMemberAttribute.Name)) ?? symbol.Name;
         WebSerializer = webSerializerAttr?.ConstructorArguments[0] switch
         {
             { Value: INamedTypeSymbol webSerializerType } => webSerializerType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             _ => null,
         };
+
+        var declaringType = symbol.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        if (symbol is IPropertySymbol
+            {
+                GetMethod:
+                {
+                    DeclaredAccessibility: not Accessibility.Public
+                } getter
+            })
+        {
+            var returnType = memberType.IsValueType ? Type : Type + "?";
+            var accessorName = $"Getter_{symbol.ContainingType.Name}_{symbol.Name}";
+            var refModifier = targetType.IsValueType ? "ref " : "";
+            GetterAccessor = new UnsafeGetterAccessor(getter.Name, returnType, accessorName, refModifier, declaringType);
+            ValueAccess = $"{accessorName}({refModifier}value)";
+        }
+        else if (!SymbolEqualityComparer.Default.Equals(symbol.ContainingType, targetType))
+        {
+            ValueAccess = $"(({declaringType})value).{symbol.Name}";
+        }
+        else
+        {
+            ValueAccess = $"value.{symbol.Name}";
+        }
     }
 }
+
+public sealed record UnsafeGetterAccessor(
+    string MetadataName,
+    string ReturnType,
+    string Name,
+    string RefModifier,
+    string ParameterType
+);

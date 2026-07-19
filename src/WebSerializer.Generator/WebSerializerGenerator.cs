@@ -25,7 +25,7 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
                 using System.Diagnostics;
 
                 namespace Proudust.Web;
-                
+
                 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
                 [Conditional("COMPILE_TIME_ONLY")]
                 internal sealed class WebSerializableAttribute : Attribute
@@ -169,12 +169,13 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
                     if (member.IsNullable)
                     {
                         sb.Append(/* lang=c#-test */ $$"""
-                            if (value.{{member.MemberName}} is not null)
+                            if ({{member.ValueAccess}} is not null)
                             {
 
                             """);
                     }
 
+                    // NOTE: Cysharp/WebSerializer#23
                     if (0 < i)
                     {
                         sb.Append(/* lang=c#-test */ """
@@ -191,14 +192,14 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
                     if (member.WebSerializer is null)
                     {
                         sb.Append($$"""
-                                    options.GetRequiredSerializer<{{member.Type}}>().Serialize(ref writer, value.{{member.MemberName}}, options);
+                                    options.GetRequiredSerializer<{{member.Type}}>().Serialize(ref writer, {{member.ValueAccess}}, options);
 
                         """);
                     }
                     else
                     {
                         sb.Append($$"""
-                                    new {{member.WebSerializer}}().Serialize(ref writer, value.{{member.MemberName}}, options);
+                                    new {{member.WebSerializer}}().Serialize(ref writer, {{member.ValueAccess}}, options);
 
                         """);
                     }
@@ -233,6 +234,19 @@ public sealed partial class WebSerializerGenerator : IIncrementalGenerator
                                 [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "namePrefix")]
                                 private static extern ref string? GetNamePrefix(ref WebSerializerWriter writer);
                         """);
+                }
+
+                foreach (var member in type.Members)
+                {
+                    if (member.GetterAccessor is not null)
+                    {
+                        var accessor = member.GetterAccessor;
+                        sb.AppendLine($$"""
+
+                                    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "{{accessor.MetadataName}}")]
+                                    private static extern {{accessor.ReturnType}} {{accessor.Name}}({{accessor.RefModifier}}{{accessor.ParameterType}} value);
+                            """);
+                    }
                 }
 
                 sb.AppendLine("""

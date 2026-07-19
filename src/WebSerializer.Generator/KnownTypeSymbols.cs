@@ -14,6 +14,8 @@ public sealed class KnownTypeSymbols(Compilation compilation)
 
     public INamedTypeSymbol WebSerializerAttributeType { get; } = ResolveType(compilation, "Cysharp.Web.WebSerializerAttribute");
 
+    public INamedTypeSymbol IgnoreWebSerializeAttributeType { get; } = ResolveType(compilation, "Cysharp.Web.IgnoreWebSerializeAttribute");
+
     public INamedTypeSymbol WebSerializableGenericAttributeType { get; } = ResolveType(compilation, "Proudust.Web.WebSerializableAttribute`1");
 
     public INamedTypeSymbol WebSerializableNonGenericAttributeType { get; } = ResolveType(compilation, "Proudust.Web.WebSerializableAttribute");

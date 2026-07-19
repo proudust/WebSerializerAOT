@@ -4,6 +4,20 @@ namespace Proudust.Web;
 
 public static class RoslynExtensions
 {
+    public static AttributeData? GetAttribute(this ISymbol symbol, INamedTypeSymbol attributeType, bool walkOverrides)
+    {
+        for (ISymbol? current = symbol; current is not null; current = walkOverrides ? (current as IPropertySymbol)?.OverriddenProperty : null)
+        {
+            var attribute = current.GetAttributes().FirstOrDefault(x => SymbolEqualityComparer.Default.Equals(x.AttributeClass, attributeType));
+            if (attribute is not null)
+            {
+                return attribute;
+            }
+        }
+
+        return null;
+    }
+
     public static IEnumerable<INamedTypeSymbol> EnumerateContainingTypes(this ISymbol symbol)
     {
         INamedTypeSymbol? containingType = symbol.ContainingType;
@@ -11,6 +25,22 @@ public static class RoslynExtensions
         {
             yield return containingType;
             containingType = containingType.ContainingType;
+        }
+    }
+
+    public static IEnumerable<ISymbol> GetAllMembers(this INamedTypeSymbol symbol)
+    {
+        if (symbol.BaseType != null)
+        {
+            foreach (var member in GetAllMembers(symbol.BaseType))
+            {
+                yield return member;
+            }
+        }
+
+        foreach (var member in symbol.GetMembers())
+        {
+            yield return member;
         }
     }
 
